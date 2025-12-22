@@ -2,149 +2,212 @@ import streamlit as st
 import datetime
 import google.generativeai as genai
 
-# --- APP CONFIGURATION ---
-st.set_page_config(page_title="Bradley Family Travel Planner", page_icon="🚐", layout="wide")
+# --- 1. APP CONFIGURATION ---
+st.set_page_config(
+    page_title="Bradley Planner v11.9 (Main Page View)", 
+    page_icon="🚐", 
+    layout="centered", 
+    # CHANGED: Sidebar is now expanded by default, just in case
+    initial_sidebar_state="expanded"
+)
 
-# --- SIDEBAR: SETTINGS & VEHICLE PROFILE ---
+# --- 2. CUSTOM CSS ---
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            .stApp {padding-top: 10px;}
+            div[data-testid="stVerticalBlock"] > div {gap: 0.8rem;}
+            .stButton>button {
+                width: 100%;
+                border-radius: 10px;
+                height: 3em;
+                font-weight: bold;
+            }
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+# --- 3. SIDEBAR: API KEY ONLY ---
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("🔐 App Settings")
+    # Secure API Key Logic
+    try:
+        if "GOOGLE_API_KEY" in st.secrets:
+            api_key = st.secrets["GOOGLE_API_KEY"]
+            st.success("API Key Loaded")
+        else:
+            api_key = st.text_input("Gemini API Key", type="password")
+    except Exception:
+        api_key = st.text_input("Gemini API Key", type="password")
     
-    # Securely accept API Key
-    api_key = st.text_input("Enter Google Gemini API Key", type="password", help="Get one at aistudio.google.com")
+    st.info("Note: Vehicle settings have been moved to the main page for easier access.")
+
+# --- 4. MAIN INTERFACE ---
+st.title("Multi-Day Trip Planner v11.9")
+
+# --- NEW: VEHICLE CONFIGURATION (MOVED TO MAIN PAGE) ---
+# We use an expander that is OPEN (expanded=True) by default so you see it immediately.
+with st.expander("🚐 Vehicle Configuration (Edit Here)", expanded=True):
+    st.caption("Verify your rig details below:")
+    
+    # These are now on the main page, impossible to miss
+    col_tow, col_trail = st.columns(2)
+    with col_tow:
+        tow_vehicle = st.text_input("Tow Vehicle", value="2023 RAM 2500 Rebel (Gas)", key="main_tow_v3")
+    with col_trail:
+        trailer_name = st.text_input("Trailer", value="2026 Impression 318RL", key="main_trailer_v3")
+    
+    col_specs1, col_specs2, col_specs3 = st.columns(3)
+    with col_specs1:
+        length = st.text_input("Length", value="39'", key="main_len_v3")
+    with col_specs2:
+        weight = st.text_input("Weight", value="~14k lbs", key="main_weight_v3")
+    with col_specs3:
+        mpg = st.number_input("Est. MPG", value=8.5, step=0.5, format="%.1f", key="main_mpg_v3")
+
+# --- TRIP DETAILS ---
+with st.container(border=True):
+    st.subheader("📍 Route & Pace")
+    
+    origin = st.text_input("Departure Location", placeholder="e.g. North Bend, WA")
+    destination = st.text_input("Final Destination", placeholder="e.g. Moab, UT")
+    
+    st.markdown("###")
+    
+    # Slider to control how many days the AI creates
+    max_drive = st.slider("Max Driving Hours per Day", min_value=2, max_value=12, value=6, format="%d hrs")
+
+    col_date, col_time = st.columns(2)
+    with col_date:
+        # Defaults to Tomorrow
+        default_date = datetime.date.today() + datetime.timedelta(days=1)
+        dept_date = st.date_input("Start Date", default_date)
+    with col_time:
+        # Defaults to 9:00 AM
+        dept_time = st.time_input("Start Time", datetime.time(9, 0))
+
+# --- PREFERENCES ---
+with st.expander("🛠️ Strategy & Homeschool", expanded=False):
+    c1, c2 = st.columns(2)
+    with c1:
+        pref_membership = st.checkbox("Thousand Trails/Harvest Hosts", value=True)
+        pref_boondock = st.checkbox("Allow Boondocking", value=True)
+    with c2:
+        slide_out = st.checkbox("Lunch: Slide-out Capable", value=True)
+        pref_luxury = st.checkbox("Luxury Break (Marriott/Amex)", value=True)
     
     st.divider()
-    
-    st.header("🚛 Vehicle Profile")
-    # Defaults based on your specific trailer
-    tow_vehicle = st.text_input("Tow Vehicle", value="2023 RAM 2500 Rebel (Gasoline)")
-    trailer_name = st.text_input("Trailer", value="2026 Forest River Impression 318RL")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        length = st.text_input("Length", value="39'")
-        height = st.text_input("Height", value="13'4\"")
-    with col2:
-        weight = st.text_input("Weight", value="~14k lbs")
-        
-    st.info(f"⚠️ Safety Limits Configured:\n- Wind >30mph\n- Temps <-10°F\n- Clearance <15'")
+    homeschool_focus = st.selectbox("Homeschool Focus for this Leg:", 
+                                    ["General Knowledge", "Geology & Earth Science", "American History", "Wildlife Biology", "Engineering/Infrastructure"])
 
-# --- MAIN PAGE: TRIP DETAILS ---
-st.title("🚐 Travel Day Briefing Generator")
-st.markdown("Generates a v11.0 briefing using **Gemini 3.0**.")
-
-# 1. TRIP INPUTS
-with st.container(border=True):
-    st.subheader("1. Trip Details")
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        origin = st.text_input("📍 Departure Location", placeholder="e.g., Whitefish RV Park, MT")
-        dept_date = st.date_input("Departure Date", datetime.date.today())
-        dept_time = st.time_input("Departure Time", datetime.time(14, 0)) # Default 2:00 PM
-        
-    with col_b:
-        destination = st.text_input("🏁 Destination", placeholder="e.g., Red Mountain RV Park, Bozeman, MT")
-        
-# 2. PREFERENCES
-with st.container(border=True):
-    st.subheader("2. Preferences & Strategy")
-    
-    col_x, col_y = st.columns(2)
-    
-    with col_x:
-        st.markdown("**Accommodation Priority**")
-        pref_membership = st.checkbox("Thousand Trails / Harvest Hosts", value=True)
-        pref_boondock = st.checkbox("Boondocking (Public Land/Cabela's)", value=True)
-        pref_luxury = st.checkbox("Luxury Break (Marriott/Amex)", value=True)
-        
-    with col_y:
-        st.markdown("**Dining Style**")
-        slide_out = st.checkbox("Require 'Slide-out Capable' stops (Lunch)", value=True)
-        rv_friendly = st.checkbox("RV-Friendly Restaurants (Large Lots)", value=True)
-        
-    st.markdown("**Homeschool & Fun**")
-    include_homeschool = st.checkbox("Include History/Science Fact & Podcast", value=True)
-
-# --- THE PROMPT GENERATOR ---
+# --- 5. LOGIC ---
 def generate_dynamic_prompt():
-    # Constructing Section 1.1 based on User Input
-    dynamic_inputs = f"""
-    1.1 INPUT REQUIRED:
-    Departure Location: {origin}
-    Departure Date: {dept_date}
-    Departure Time: {dept_time.strftime("%I:%M %p")}
+    return f"""
+    ### TRAVEL DAY BRIEFING PROMPT (v11.9)
+    Instructions: Generate a segmented multi-day briefing with MULTIPLE options for every stop.
+
+    INPUT REQUIRED:
+    Departure: {origin}
     Destination: {destination}
-    """
+    Start Date: {dept_date}
+    Start Time: {dept_time.strftime("%I:%M %p")}
+    MAX DRIVING PER DAY: {max_drive} hours.
+
+    CONTEXT:
+    Rig: {tow_vehicle} + {trailer_name} ({length}, {weight}).
+    Fuel Economy: {mpg} MPG (Use this to calculate fuel cost).
     
-    # Constructing Section 1.2 based on Sidebar
-    vehicle_context = f"""
-    1.2 CONTEXT: Family Travel Profile
-    Vehicle Setup:
-    * Tow Vehicle: {tow_vehicle}
-    * Trailer: {trailer_name} ({length} Long, {height} High, {weight}).
-    Accommodation Preferences:
-    {f"1. Memberships (Thousand Trails/Harvest Hosts)" if pref_membership else ""}
-    {f"2. Boondocking" if pref_boondock else ""}
-    {f"3. Luxury Break" if pref_luxury else ""}
-    Dining Preferences:
-    * Lunch: 11:30 AM - 1:30 PM.
-    * Dinner: 5:00 PM - 6:30 PM.
-    * Style: { "Scenic rest areas (Slide-out capable)" if slide_out else "Any" }, { "RV-friendly restaurants" if rv_friendly else "Any" }.
-    Safety Limits:
-    * ⚠️ EXTREME CAUTION if wind >30 mph or temps <-10°F.
-    * ⚠️ Flag clearances <15' (RV is {height}).
+    PREFERENCES:
+    - Accom: {'Thousand Trails/HH' if pref_membership else 'Public/Paid'} / {'Boondocking OK' if pref_boondock else 'No Boondocking'}.
+    - Dining: Slide-outs {'Required' if slide_out else 'Not Required'}.
+    - Homeschool Topic: {homeschool_focus}.
+
+    YOUR TASK:
+    1. Calculate total mileage and ESTIMATED COST ($).
+    2. Split the route into days based on {max_drive} hours driving.
+    3. FOR EVERY STOP (Fuel & Lunch), provide 2 DISTINCT OPTIONS.
+    4. Provide specific Google Maps links for ALL locations.
+
+    OUTPUT STRUCTURE (Markdown):
+
+    🚨 TRIP OVERVIEW & BUDGET
+    * Total Distance: [X] Miles.
+    * Total Days: [X].
+    * 💰 Est. Fuel Cost: $[X] (Based on {mpg} mpg).
+    * Status: GO / ⚠️ CAUTION.
+    * 🗺️ Route Map: [Google Maps Link]
+
+    ---
+    (REPEAT FOR EACH DAY)
+
+    ## 📅 DAY [X]: [Start] ➡️ [End]
+    * Date: [Date]
+    * Stats: [X] Miles | [X] Hours
+
+    🌤️ WEATHER (Confidence: High/Med/Low)
+    * Forecast: [AM/PM summary]
+
+    ⛽ FUEL STRATEGY (2 Options)
+    * Option 1 (Best Price): [Station Name] ($[Price]) - [Link]
+    * Option 2 (Best Access/RV Lanes): [Station Name] - [Link]
+
+    🍴 LUNCH STRATEGY (2 Options)
+    * Option A (Slide-outs OK): [Name/Location] - [Link]
+        * Why: [e.g. Scenic rest area, large park]
+    * Option B (Restaurant/Fast): [Name/Location] - [Link]
+        * Why: [e.g. Large lot, kid-friendly]
+
+    🛌 OVERNIGHT (2 Options)
+    * Option 1 (Preferred): [Name] - [Link].
+        * Why: [e.g. Membership match].
+    * Option 2 (Backup): [Name] - [Link].
+        * Why: [e.g. Location].
+    
+    🎓 HOMESCHOOL ({homeschool_focus})
+    * Lesson: [Fact/Activity related to {homeschool_focus}].
+
+    🛣️ HAZARDS
+    * [Steep Grades / Truck Routes / Wind / Parking Maneuver Analysis]
+
+    ---
     """
 
-    # The Static Instructions
-    static_instructions = """
-    1.3 YOUR TASK:
-    Act as an expert travel logistics planner. Generate a comprehensive Travel Day Briefing optimized for mobile viewing.
-    You must browse the web to find real-time weather, current gas prices, and specific dining/stop options matching the family profile.
-    
-    1.4 OUTPUT STRUCTURE:
-    Provide a structured output with:
-    1.4.1 EXECUTIVE SUMMARY (Status: GO/CAUTION, Route Map Link)
-    1.4.2 ROUTE OVERVIEW (Miles, Time, Fuel Needed, Overnight Stop if >5hrs)
-    1.4.3 WEATHER & WIND (Hourly forecast, Pass conditions, Confidence)
-    1.4.4 FUEL & MEAL STRATEGY (Best prices, Slide-out friendly stops for lunch)
-    1.4.5 OVERNIGHT RECOMMENDATIONS (If needed)
-    1.4.6 HAZARDS (Truck network, grades, wildlife)
-    1.4.7 HOMESCHOOL & FUN (Podcast, Science fact, Playground)
-    1.4.8 PRE-DEPARTURE CHECKLIST
-    1.4.9 ARRIVAL DETAILS (Sunset vs Arrival time)
-    
-    Ensure all advice considers the specific vehicle length (39') and weight (~14k lbs).
-    """
-    
-    return dynamic_inputs + "\n" + vehicle_context + "\n" + static_instructions
-
-# --- ACTION BUTTON ---
-if st.button("🚀 Generate Briefing", type="primary"):
+# --- 6. ACTION BUTTON ---
+st.markdown("###")
+if st.button("🚀 Plan Multi-Day Trip", type="primary"):
     if not api_key:
-        st.error("Please enter your Google Gemini API Key in the sidebar.")
+        st.error("⚠️ API Key missing. Check sidebar.")
+    elif not origin or not destination:
+        st.warning("⚠️ Enter Departure and Destination.")
     else:
-        if not origin or not destination:
-            st.warning("Please enter both Departure and Destination.")
-        else:
-            with st.spinner("Analyzing route, weather, and campgrounds..."):
-                try:
-                    # 1. Configure the AI
-                    genai.configure(api_key=api_key)
-                    
-                    # 2. Select the Model (UPDATED FOR GEMINI 3.0)
-                    # 'gemini-3-flash-preview' is the high-speed standard for 2025.
-                    model = genai.GenerativeModel('gemini-3-flash-preview')
-                    
-                    # 3. Construct the prompt
-                    final_prompt = generate_dynamic_prompt()
-                    
-                    # 4. Send to AI
-                    response = model.generate_content(final_prompt)
-                    
-                    # 5. Display Result
-                    st.success("Briefing Generated!")
-                    st.markdown("---")
-                    st.markdown(response.text)
-                    
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
+        status_box = st.status("📋 Planning & Calculating Costs...", expanded=True)
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-3-flash-preview')
+            
+            # Update status
+            status_box.write(f"Analyzing route for {tow_vehicle}...")
+            prompt = generate_dynamic_prompt()
+            
+            status_box.write("✍️ Drafting Itinerary...")
+            response = model.generate_content(prompt)
+            
+            status_box.update(label="✅ Briefing Complete!", state="complete", expanded=False)
+            
+            # DISPLAY RESULT
+            with st.container(border=True):
+                st.markdown(response.text)
+
+            # DOWNLOAD BUTTON (Offline Mode)
+            filename = f"Trip_Plan_{destination.replace(' ', '_')}_{datetime.date.today()}.md"
+            st.download_button(
+                label="📥 Download Plan (Offline)",
+                data=response.text,
+                file_name=filename,
+                mime="text/markdown"
+            )
+                
+        except Exception as e:
+            status_box.update(label="❌ Error", state="error")
+            st.error(f"System Error: {e}")
